@@ -5,6 +5,7 @@ cur_path = Path(__file__).resolve().parent.parent.parent
 sys.path.append(cur_path.as_posix())
 
 from openbox import space as sp
+from openbox import logger
 from openbox.core.generic_advisor import Advisor
 from openbox.utils.constants import SUCCESS, FAILED, TIMEOUT
 from openbox.utils.limit import run_obj_func
@@ -31,9 +32,8 @@ class MiniSMBO(BOBase):
   def iterate(self, timeout=None) -> Observation:
 
     config = self.config_advisor.get_suggestion()
-
     # if config in self.config_advisor.history.configurations:
-    #   print('Evaluating duplicated configuration: %s' % config)
+    #   logger.warning('Evaluating duplicated configuration: %s' % config)
 
     obj_args, obj_kwargs = (config,), dict()
     result = run_obj_func(self.objective_function, obj_args, obj_kwargs, timeout)
@@ -53,6 +53,7 @@ class MiniSMBO(BOBase):
     )
     self.config_advisor.update_observation(observation)
     self.iteration_id += 1
+    logger.info('Iter %d, objectives: %s. constraints: %s.' % (self.iteration_id, objectives, constraints))
     return observation
 
 
