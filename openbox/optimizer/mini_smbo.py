@@ -7,6 +7,7 @@ sys.path.append(cur_path.as_posix())
 from openbox import space as sp
 from openbox import logger
 from openbox.core.generic_advisor import Advisor
+from openbox.core.mini_advisor import MiniAdvisor
 from openbox.utils.constants import SUCCESS, FAILED, TIMEOUT
 from openbox.utils.limit import run_obj_func
 from openbox.utils.util_funcs import parse_result
@@ -19,12 +20,13 @@ class MiniSMBO(BOBase):
     self,
     objective_function,
     config_space,
+    advisor,
     max_runs=100,
   ):
     self.objective_function = objective_function
     self.config_space = config_space
     self.max_runs = max_runs
-    self.config_advisor = Advisor(self.config_space)
+    self.config_advisor = advisor
     self.iteration_id = 0
     self.FAILED_PERF = [np.inf]
 
@@ -32,8 +34,8 @@ class MiniSMBO(BOBase):
   def iterate(self, timeout=None) -> Observation:
 
     config = self.config_advisor.get_suggestion()
-    # if config in self.config_advisor.history.configurations:
-    #   logger.warning('Evaluating duplicated configuration: %s' % config)
+    if config in self.config_advisor.history.configurations:
+      logger.warning('Evaluating duplicated configuration: %s' % config)
 
     obj_args, obj_kwargs = (config,), dict()
     result = run_obj_func(self.objective_function, obj_args, obj_kwargs, timeout)
@@ -79,9 +81,10 @@ if __name__ == "__main__":
   space.add_variables([
     sp.Real(name, *para) for name, para in params['float'].items()
   ])
-  # print(space)
   max_runs = 10
-  optimizer = MiniSMBO(objective_function=mishra, config_space=space, max_runs=max_runs)
+  advisor = MiniAdvisor(space)
+
+  optimizer = MiniSMBO(objective_function=mishra, config_space=space, max_runs=max_runs, advisor=advisor)
   for _ in range(max_runs):
     observation = optimizer.iterate()
     print(observation)
