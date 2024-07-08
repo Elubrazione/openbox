@@ -47,3 +47,5 @@ conf/*
 
 openbox/artifact/db.sqlite3
 nohup.out
+
+__pycache__/

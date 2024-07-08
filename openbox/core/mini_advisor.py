@@ -1,8 +1,10 @@
 import numpy as np
 from openbox import logger
 from openbox.core.base_advisor import BaseAdvisor
-from openbox.core.base import build_surrogate, build_acq_func
-from openbox.acq_optimizer import build_acq_optimizer
+from openbox.utils.util_funcs import get_types
+from openbox.surrogate.base.build_gp import create_gp_model
+from openbox.acquisition_function import EI
+from openbox.acq_optimizer.basic_maximizer import InterleavedLocalAndRandomSearchMaximizer
 
 
 class MiniAdvisor(BaseAdvisor):
@@ -10,35 +12,24 @@ class MiniAdvisor(BaseAdvisor):
     self,
     config_space,
     init_num=3,
-    optimization_strategy='bo',
-    surrogate_type='gp',
-    acq_type='ei',
-    acq_optimizer_type='local_random',
     init_strategy='random_explore_first'
   ):
     super().__init__(config_space=config_space)
     self.rand_prob = 0.1
-
-    # fixed parameters
-    self.optimization_strategy = optimization_strategy
-    self.surrogate_type = surrogate_type
-    self.acq_type = acq_type
-    self.acq_optimizer_type = acq_optimizer_type
     self.init_strategy = init_strategy
-
     self.initial_configurations = self.create_initial_design(init_num)
     self.init_num = len(self.initial_configurations)
 
-    logger.info(
-      '[BO auto selection]' +
-      f' surrogate_type: {self.surrogate_type}.' +
-      f' acq_type: {self.acq_type}.' +
-      f' acq_optimizer_type: {self.acq_optimizer_type}.' +
-      f' init_strategy: {self.init_strategy}.'
+    types, bounds = get_types(config_space)
+    self.surrogate_model = create_gp_model(
+      model_type='gp',
+      config_space=self.config_space,
+      types=types,
+      bounds=bounds,
+      rng=self.rng
     )
-    self.surrogate_model = build_surrogate(config_space=self.config_space, rng=self.rng)  # default value of func_str is 'gp'
-    self.acquisition_function = build_acq_func(model=self.surrogate_model)  # default value of func_str is 'ei'
-    self.acq_optimizer = build_acq_optimizer(config_space=self.config_space, rng=self.rng)  # default value of func_str is 'local_random'
+    self.acquisition_function = EI(model=self.surrogate_model)
+    self.acq_optimizer = InterleavedLocalAndRandomSearchMaximizer(self.config_space, self.rng)
 
 
   def create_initial_design(self, init_num):
