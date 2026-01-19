@@ -1,0 +1,74 @@
+# setup.py
+build
+dist
+*.egg*
+
+# Python
+*.pyc
+*.pyo
+
+# IDEs
+.idea
+.vscode
+
+# MACOSX
+.DS_Store
+
+# Eclipse files
+.pydevproject
+.project
+
+# Log files.
+logs/
+
+# TensorboardX files.
+runs/
+
+# Jupyter checkpoint files.
+test/.ipynb_checkpoints/
+
+# Code coverage files
+.coverage*
+coverage.xml
+test/datas
+
+# Other
+.tox
+.pypirc
+.ipynb_checkpoints/
+*~
+.html/
+.mypy_cache/
+
+docs/build/
+
+conf/*
+!conf/template/
+
+openbox/artifact/db.sqlite3
+nohup.out
+__pycache__
+
+results/details/*
+results/results/*
+exps/spark_session_execute/*
+exps/default_perf/*
+exps/data_volume_correlation/**/*.log
+exps/data_volume_correlation/**/*.json
+exps/data_volume_correlation/**/*.png
+exps/data_volume_correlation/**/*.pdf
+exps/data_volume_correlation/**/execution_results.json
+log/*
+exps/ablation/*
+
+catboost_info/*
+*.cbm
+
+results/*
+docs/
+mock/*
+test*.py
+
+*.json
+*.png
+baselines
