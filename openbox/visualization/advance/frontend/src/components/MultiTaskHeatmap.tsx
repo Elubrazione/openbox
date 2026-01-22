@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 import { useMultiTaskHeatmapConfig } from '../charts';
 
 interface MultiTaskHeatmapProps {
@@ -44,6 +45,7 @@ const MultiTaskHeatmap: React.FC<MultiTaskHeatmapProps> = ({
       marginBottom: '20px',
     }}>
       <ReactECharts
+        echarts={echarts}
         option={option}
         style={{ height: dimensions.height }}
         notMerge={true}

@@ -1,7 +1,8 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 
-module.exports = (env, argv) => {
+module.exports = (_, argv) => {
   const isProduction = argv.mode === 'production';
 
   return {
@@ -44,8 +45,57 @@ module.exports = (env, argv) => {
       }),
     ],
     optimization: {
-      // Disable minimization to avoid terser-webpack-plugin issues in Docker Alpine
-      minimize: false,
+      minimize: isProduction,
+      minimizer: [
+        new TerserPlugin({
+          terserOptions: {
+            parse: {
+              ecma: 2020,
+            },
+            compress: {
+              ecma: 5,
+              comparisons: false,
+              inline: 2,
+              drop_console: isProduction,
+              drop_debugger: isProduction,
+            },
+            mangle: {
+              safari10: true,
+            },
+            output: {
+              ecma: 5,
+              comments: false,
+              ascii_only: true,
+            },
+          },
+          extractComments: false,
+          parallel: true,
+        }),
+      ],
+      splitChunks: {
+        chunks: 'all',
+        cacheGroups: {
+          vendors: {
+            test: /[\\/]node_modules[\\/]/,
+            name: 'vendors',
+            chunks: 'all',
+            priority: 10,
+          },
+          echarts: {
+            test: /[\\/]node_modules[\\/](echarts|zrender)[\\/]/,
+            name: 'echarts',
+            chunks: 'all',
+            priority: 20,
+          },
+          react: {
+            test: /[\\/]node_modules[\\/](react|react-dom)[\\/]/,
+            name: 'react',
+            chunks: 'all',
+            priority: 20,
+          },
+        },
+      },
+      runtimeChunk: 'single',
     },
     devServer: {
       static: {
@@ -64,9 +114,9 @@ module.exports = (env, argv) => {
     },
     devtool: isProduction ? false : 'source-map',
     performance: {
-      hints: false,
-      maxEntrypointSize: 1024000,  // Increased since we're not minifying
-      maxAssetSize: 1024000,
+      hints: isProduction ? 'warning' : false,
+      maxEntrypointSize: 512000,
+      maxAssetSize: 512000,
     },
   };
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 import { useParameterImportanceConfig } from '../charts';
 
 interface ParameterImportanceProps {
@@ -43,6 +44,7 @@ const ParameterImportance: React.FC<ParameterImportanceProps> = ({
       marginBottom: '20px',
     }}>
       <ReactECharts
+        echarts={echarts}
         option={option}
         style={{ height: dimensions.height }}
         notMerge={true}

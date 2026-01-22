@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 
 interface SourceSimilaritiesProps {
   similarities: Record<string, number>; // task_id -> similarity
@@ -108,7 +109,7 @@ const SourceSimilarities: React.FC<SourceSimilaritiesProps> = ({ similarities, t
 
   return (
     <div style={{ width: '100%', background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
-      <ReactECharts option={getOption()} style={{ height: '450px' }} />
+      <ReactECharts echarts={echarts} option={getOption()} style={{ height: '450px' }} />
     </div>
   );
 };

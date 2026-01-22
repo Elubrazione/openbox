@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 import { CompressionHistory } from '../types';
 import { useCompressionPipeline } from '../hooks';
 import { 
@@ -102,30 +103,28 @@ const CompressionSummary: React.FC<CompressionSummaryProps> = ({ data }) => {
         Compression Summary
       </h2>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-        {/* Panel 1: Dimension Reduction */}
         <div>
           <ReactECharts 
+            echarts={echarts}
             option={dimReductionOption} 
             style={{ height: chartHeights.medium }}
             notMerge={true}
             lazyUpdate={true}
           />
         </div>
-        
-        {/* Panel 2: Compression Ratio */}
         <div>
           <ReactECharts 
+            echarts={echarts}
             option={ratioOption} 
             style={{ height: chartHeights.medium }}
             notMerge={true}
             lazyUpdate={true}
           />
         </div>
-        
-        {/* Panel 3: Range Compression Stats */}
         <div>
           {rangeCompressionData ? (
             <ReactECharts 
+              echarts={echarts}
               option={rangeStatsOption} 
               style={{ height: chartHeights.medium }}
               notMerge={true}
@@ -144,8 +143,6 @@ const CompressionSummary: React.FC<CompressionSummaryProps> = ({ data }) => {
             </div>
           )}
         </div>
-        
-        {/* Panel 4: Text Summary */}
         <div
           style={{
             padding: '20px',

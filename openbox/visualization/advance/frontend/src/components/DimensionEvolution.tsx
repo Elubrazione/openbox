@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 import { useDimensionEvolutionConfig } from '../charts';
 
 interface DimensionEvolutionProps {
@@ -40,6 +41,7 @@ const DimensionEvolution: React.FC<DimensionEvolutionProps> = ({
       marginBottom: '20px',
     }}>
       <ReactECharts 
+        echarts={echarts}
         option={option} 
         style={{ height: chartDimensions.height }}
         notMerge={true}

@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactECharts from 'echarts-for-react';
+import echarts from '../utils/echarts';
 import { PipelineStep } from '../types';
 
 interface RangeCompressionProps {
@@ -329,6 +330,7 @@ const RangeCompression: React.FC<RangeCompressionProps> = ({ step, stepIndex }) 
   return (
     <div style={{ width: '100%', background: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px' }}>
       <ReactECharts
+        echarts={echarts}
         option={getOption()}
         style={{ height: `${Math.max(400, step.compression_info!.compressed_params.length * 25)}px` }}
       />

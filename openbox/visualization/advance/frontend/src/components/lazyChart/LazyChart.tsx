@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
-import type { EChartsOption } from 'echarts';
+import echarts, { type EChartsOption } from '../../utils/echarts';
 import { useLazyChart } from '../../hooks/useLazyChart';
 import { useChunkedData } from '../../hooks/useChunkedData';
 import { ChartPlaceholder } from './ChartPlaceholder';
@@ -214,6 +214,7 @@ export const LazyChart: React.FC<LazyChartProps> = ({
               />
             )}
 <ReactECharts
+              echarts={echarts}
               option={chartOption}
               style={{ 
                 height: chartHeight,
