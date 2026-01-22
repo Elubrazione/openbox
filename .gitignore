@@ -2,6 +2,10 @@
 build
 dist
 *.egg*
+**/static/
+**/node_modules/
+**/dist/
+results/
 
 # Python
 *.pyc
@@ -31,6 +35,15 @@ test/.ipynb_checkpoints/
 .coverage*
 coverage.xml
 test/datas
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
 # Other
 .tox

@@ -324,3 +324,25 @@ class Compressor(ABC):
             'n_updates': len(self.compression_history),
             'pipeline_steps': [step.name for step in self.pipeline.steps] if self.pipeline else []
         }
+    
+    def _ensure_visualization_data(self):
+        if not self.compression_history:
+            self._save_compression_info(event='visualization')
+    
+    def visualize_html(self, open: bool = True) -> str:
+        """Generate static HTML. Returns file path."""
+        self._ensure_visualization_data()
+        from openbox.visualization.advance.html_generator import generate_static_html
+        return generate_static_html(data_dir=self.output_dir, open_browser=open)
+    
+    def visualize_server(self, port: int = 8050, host: str = '127.0.0.1', background: bool = False) -> str:
+        """Start local server. Returns server URL."""
+        self._ensure_visualization_data()
+        from openbox.visualization.advance.server import start_visualization_server
+        return start_visualization_server(
+            data_dir=self.output_dir,
+            port=port,
+            host=host,
+            open_browser=True,
+            blocking=not background
+        )

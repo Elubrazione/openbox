@@ -8,7 +8,12 @@ from typing import List, Optional
 from openbox import logger
 from openbox.utils.util_funcs import check_random_state, deprecate_kwarg
 from openbox.utils.history import History
-from manager import TaskManager
+
+# TaskManager is optional - may not exist in all deployments
+try:
+    from manager import TaskManager
+except ImportError:
+    TaskManager = None
 
 
 class BOBase(object, metaclass=abc.ABCMeta):
@@ -49,7 +54,7 @@ class BOBase(object, metaclass=abc.ABCMeta):
         self.sample_strategy = sample_strategy
         self.transfer_learning_history = transfer_learning_history
         self.config_advisor = None
-        self.task_manager = getattr(TaskManager, "_instance", None)
+        self.task_manager = getattr(TaskManager, "_instance", None) if TaskManager else None
 
     def run(self):
         raise NotImplementedError()
