@@ -6,3 +6,4 @@ recursive-include requirements *.txt
 recursive-include scripts *.sh
 recursive-include openbox *.html *.js *.css *.woff *.woff2 *.json *.jpg
 recursive-include openbox py.typed
+recursive-exclude openbox/visualization/advance/frontend *

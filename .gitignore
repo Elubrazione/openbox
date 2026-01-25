@@ -1,10 +1,9 @@
 # setup.py
 build
 dist
-*.egg*
-**/static/
-**/node_modules/
 **/dist/
+*.egg*
+**/node_modules/
 results/
 
 # Python

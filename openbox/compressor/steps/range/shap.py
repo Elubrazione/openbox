@@ -4,14 +4,28 @@ from typing import Optional, List, Tuple, Dict
 from openbox.utils.history import History
 from ConfigSpace import ConfigurationSpace
 from sklearn.ensemble import RandomForestRegressor
-import shap
 from openbox import logger
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    shap = None
 from .boundary import BoundaryRangeStep
 from ...utils import (
     create_space_from_ranges,
     extract_numeric_hyperparameters,
     extract_top_samples_from_history,
 )
+
+
+def _check_shap_available():
+    if not SHAP_AVAILABLE:
+        raise ImportError(
+            "shap is required for SHAPBoundaryRangeStep. "
+            "Install it with: pip install shap, or pip install openbox[extra]"
+        )
 
 
 class SHAPBoundaryRangeStep(BoundaryRangeStep):    
@@ -23,6 +37,7 @@ class SHAPBoundaryRangeStep(BoundaryRangeStep):
                  initial_prob: float = 0.9,
                  seed: Optional[int] = None,
                  **kwargs):
+        _check_shap_available()
         super().__init__(
             method=method,
             top_ratio=top_ratio,

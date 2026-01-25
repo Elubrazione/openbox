@@ -82,8 +82,8 @@ dependencies = {file = "requirements/main.txt"}     # pip install .
 
 [tool.setuptools.dynamic.optional-dependencies]
 extra = {file = "requirements/extra.txt"}           # pip install ".[extra]"
-# service = service + extra                         # pip install ".[service]"
-service = {file = [
+online = {file = "requirements/online.txt"}  # pip install ".[online]"
+service = {file = [                                 # pip install ".[service]"
     "requirements/service.txt",
     "requirements/extra.txt",
 ]}
