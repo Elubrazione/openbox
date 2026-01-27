@@ -50,6 +50,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      # Build frontend first
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: openbox/visualization/advance/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: openbox/visualization/advance/frontend
+        run: |
+          npm ci
+          npm run build
+          cp -r dist ../static
+          echo "Frontend built successfully:"
+          ls -la ../static/
+
+      # Then build Python package
       - name: Set up Python ${{ env.build-python-version }}
         uses: actions/setup-python@v4
         with:
