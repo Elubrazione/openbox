@@ -1,199 +1,265 @@
-import json
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Set
-from ConfigSpace import ConfigurationSpace, Configuration
-from ConfigSpace.hyperparameters import (
-    UniformIntegerHyperparameter,
-    UniformFloatHyperparameter,
-    CategoricalHyperparameter
-)
-from openbox import logger
-from openbox.utils.history import History, Observation
-from openbox.utils.constants import SUCCESS
+import os
+import sys
+import argparse
+import yaml
+from copy import deepcopy
+from typing import Any, Dict, List, Optional, Tuple
 
+from .constants import PARAM_REGISTRY, SKIP_CLI_TO_CONFIG, ParamType
 
-def create_hyperparameter_from_dict(hp_dict: Dict[str, Any]) -> Optional:
-    hp_type = hp_dict.get('type', '').lower()
-    name = hp_dict['name']
-    
-    if 'uniform_int' in hp_type or hp_type == 'int' or hp_type == 'integer':
-        return UniformIntegerHyperparameter(
-            name=name,
-            lower=int(hp_dict['lower']),
-            upper=int(hp_dict['upper']),
-            default_value=hp_dict.get('default', int((hp_dict['lower'] + hp_dict['upper']) / 2)),
-            log=hp_dict.get('log', False)
-        )
-    elif 'uniform_float' in hp_type or hp_type == 'float' or hp_type == 'real':
-        return UniformFloatHyperparameter(
-            name=name,
-            lower=float(hp_dict['lower']),
-            upper=float(hp_dict['upper']),
-            default_value=hp_dict.get('default', (hp_dict['lower'] + hp_dict['upper']) / 2),
-            log=hp_dict.get('log', False)
-        )
-    elif hp_type == 'categorical':
-        return CategoricalHyperparameter(
-            name=name,
-            choices=hp_dict['choices'],
-            default_value=hp_dict.get('default', hp_dict['choices'][0] if hp_dict['choices'] else None)
-        )
-    else:
-        logger.warning(f"Unknown hyperparameter type: {hp_type} for {name}, skipping")
-        return None
-
-
-def create_config_space_for_params(
-    param_names: Set[str],
-    hyperparameters_def: List[Dict[str, Any]]
-) -> ConfigurationSpace:
-    cs = ConfigurationSpace()
-    for hp_dict in hyperparameters_def:
-        if hp_dict.get('name') in param_names:
-            hp = create_hyperparameter_from_dict(hp_dict)
-            if hp is not None:
-                cs.add_hyperparameter(hp)
-    return cs
-
-
-def load_history_with_dynamic_space(
-    filename: str,
-    fallback_config_space: Optional[ConfigurationSpace] = None
-) -> History:
+def validate_param(name: str, value: Any) -> Tuple[bool, Optional[str]]:
     """
-    Load history from JSON file, dynamically creating config space for each observation.
-    
-    This function handles cases where different observations may use different
-    config spaces (e.g., first observation uses original space, later ones use
-    compressed space with fewer parameters).
-    
-    Args:
-        filename: Path to history JSON file
-        fallback_config_space: Optional fallback config space if extraction fails
-    
-    Returns:
-        History object with loaded observations
+    (is_valid, error_msg).  Unknown params pass silently.
     """
-    with open(filename, 'r') as f:
-        data = json.load(f)
-    
-    task_id = data.get('task_id', 'unknown_task')
-    num_objectives = data.get('num_objectives', 1)
-    num_constraints = data.get('num_constraints', 0)
-    meta_info = data.get('meta_info', {})
-    
-    global_start_time_str = data.get('global_start_time')
-    if global_start_time_str:
-        global_start_time = datetime.fromisoformat(global_start_time_str)
-    else:
-        global_start_time = datetime.now()
-    
-    space_info = meta_info.get('space', {})
-    original_space = space_info.get('original', {})
-    hyperparameters_def = original_space.get('hyperparameters', [])
-    
-    if not hyperparameters_def:
-        logger.warning(f"No hyperparameters definition found in {filename}, "
-                      f"using fallback config space")
-        if fallback_config_space is None:
-            raise ValueError(f"Cannot load history: no hyperparameters definition "
-                           f"and no fallback config space provided")
-    else:
-        logger.info(f"Found {len(hyperparameters_def)} hyperparameters in history file")
-    
-    observations_data = data.get('observations', [])
-    observations = []
-    
-    config_space_cache: Dict[frozenset, ConfigurationSpace] = {}
-    
-    for obs_idx, obs_data in enumerate(observations_data):
-        config_dict = obs_data.get('config', {})
-        if not isinstance(config_dict, dict):
-            raise ValueError(f"Observation {obs_idx} config must be a dictionary")
-        
-        param_names = set(config_dict.keys())
-        param_key = frozenset(param_names)
-        if param_key not in config_space_cache:
-            if hyperparameters_def:
-                config_space_cache[param_key] = create_config_space_for_params(
-                    param_names, hyperparameters_def
-                )
-                logger.debug(f"Created config space for observation {obs_idx} "
-                           f"with {len(param_names)} parameters: {sorted(param_names)}")
-            else:
-                config_space_cache[param_key] = fallback_config_space
-        
-        config_space = config_space_cache[param_key]
-        
-        try:
-            config = Configuration(config_space, values=config_dict)
-        except Exception as e:
-            logger.error(f"Failed to create Configuration for observation {obs_idx}: {e}")
-            logger.error(f"Config dict keys: {list(config_dict.keys())}")
-            logger.error(f"Config space params: {[hp.name for hp in config_space.get_hyperparameters()]}")
-            raise
-        
-        if 'objectives' in obs_data:
-            objectives = obs_data['objectives']
-        elif 'objective' in obs_data:
-            objectives = [obs_data['objective']]
-        else:
-            raise ValueError(f"Observation {obs_idx} must have 'objectives' or 'objective' field")
-        
-        constraints = obs_data.get('constraints', None)
-        
-        trial_state = obs_data.get('trial_state', SUCCESS)
-        if isinstance(trial_state, int):
-            if trial_state == 0:
-                trial_state = SUCCESS
-        
-        elapsed_time = obs_data.get('elapsed_time', 0.0)
-        
-        create_time_str = obs_data.get('create_time')
-        if create_time_str:
-            try:
-                create_time = datetime.fromisoformat(create_time_str)
-            except:
-                create_time = None
-        else:
-            create_time = None
-        
-        extra_info = obs_data.get('extra_info', {})
-        
-        obs = Observation(
-            config=config,
-            objectives=objectives,
-            constraints=constraints,
-            trial_state=trial_state,
-            elapsed_time=elapsed_time,
-            extra_info=extra_info
-        )
-        
-        if create_time:
-            obs.create_time = create_time
-        
-        observations.append(obs)
-    
-    if observations:
-        history_config_space = observations[0].config.configuration_space
-    elif fallback_config_space:
-        history_config_space = fallback_config_space
-    else:
-        history_config_space = ConfigurationSpace()
-    
-    history = History(
-        task_id=task_id,
-        num_objectives=num_objectives,
-        num_constraints=num_constraints,
-        config_space=history_config_space,
-        meta_info=meta_info
-    )
-    
-    history.global_start_time = global_start_time
-    history.update_observations(observations)
-    
-    logger.info(f'Loaded history (len={len(observations)}) from {filename} '
-                f'with dynamic config space support')
-    
-    return history
+    spec = PARAM_REGISTRY.get(name)
+    if spec is None:
+        # Unknown param — not our business
+        return True, None
 
+    if value is None:
+        if spec.get("required", False):
+            return False, f"'{name}' is required"
+        return True, None
+
+    ptype = spec["type"]
+
+    # --- type check ---
+    type_ok = {
+        ParamType.STRING:  lambda v: isinstance(v, str),
+        ParamType.INT:     lambda v: isinstance(v, int) and not isinstance(v, bool),
+        ParamType.FLOAT:   lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        ParamType.BOOL:    lambda v: isinstance(v, bool),
+        ParamType.PATH:    lambda v: isinstance(v, str),
+        ParamType.CHOICE:  lambda v: True,
+    }
+    if not type_ok.get(ptype, lambda v: True)(value):
+        return False, f"'{name}' expects {ptype.value}, got {type(value).__name__}"
+
+    # --- choices check ---
+    choices = spec.get("choices")
+    if choices is not None and value not in choices:
+        return False, f"'{name}' must be one of {choices}, got '{value}'"
+
+    # --- range check ---
+    vrange = spec.get("range")
+    if vrange is not None and ptype in (ParamType.INT, ParamType.FLOAT):
+        lo, hi = vrange
+        if lo is not None and value < lo:
+            return False, f"'{name}' must be >= {lo}, got {value}"
+        if hi is not None and value > hi:
+            return False, f"'{name}' must be <= {hi}, got {value}"
+
+    return True, None
+
+
+def validate_params(params: Dict[str, Any],
+                    strict: bool = False) -> Tuple[bool, List[str]]:
+    errors = []
+    for name, value in params.items():
+        if strict and name not in PARAM_REGISTRY:
+            errors.append(f"Unknown parameter: '{name}'")
+            continue
+        ok, msg = validate_param(name, value)
+        if not ok:
+            errors.append(msg)
+    # required check
+    for name, spec in PARAM_REGISTRY.items():
+        if spec.get("required", False) and name not in params:
+            errors.append(f"Required parameter '{name}' is missing")
+    return len(errors) == 0, errors
+
+
+def is_supported(name: str) -> bool:
+    """Check if a parameter name is known in the registry."""
+    return name in PARAM_REGISTRY
+
+
+def get_default(name: str) -> Any:
+    """Get default value from registry.  Returns None for unknown params."""
+    spec = PARAM_REGISTRY.get(name)
+    return spec["default"] if spec else None
+
+
+def get_choices(name: str) -> Optional[List[Any]]:
+    """Get valid choices list, or None."""
+    spec = PARAM_REGISTRY.get(name)
+    if spec:
+        return spec.get("choices")
+    return None
+
+
+def get_config_path(name: str) -> Optional[List[str]]:
+    spec = PARAM_REGISTRY.get(name)
+    if spec:
+        return spec.get("config_path")
+    return None
+
+
+# CLI Parsing
+def build_parser(description: str = "OpenBox") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+    for name, spec in PARAM_REGISTRY.items():
+        _add_argument(parser, name, spec)
+    return parser
+
+
+def _add_argument(parser: argparse.ArgumentParser,
+                  name: str,
+                  spec: Dict[str, Any]) -> None:
+    ptype = spec["type"]
+    kwargs: Dict[str, Any] = {
+        "default": spec.get("default"),
+        "help": spec.get("desc", ""),
+    }
+
+    if ptype == ParamType.BOOL:
+        # flag
+        if not spec.get("default", False):
+            kwargs.pop("default", None)
+            parser.add_argument(f"--{name}", action="store_true", default=False,
+                                help=spec.get("desc", ""))
+        else:
+            parser.add_argument(f"--no_{name}", action="store_false", dest=name,
+                                default=True, help=spec.get("desc", ""))
+        return
+
+    if ptype == ParamType.CHOICE:
+        kwargs["choices"] = spec.get("choices")
+        kwargs["type"] = str
+    elif ptype == ParamType.INT:
+        kwargs["type"] = int
+    elif ptype == ParamType.FLOAT:
+        kwargs["type"] = float
+    else:
+        kwargs["type"] = str
+
+    parser.add_argument(f"--{name}", **kwargs)
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    ok, errors = validate_params(vars(args))
+    if not ok:
+        parser.error("\n".join(errors))
+
+    return args
+
+# YAML loading & dict merging
+def load_yaml(path: str) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_yaml_with_includes(path: str) -> Dict[str, Any]:
+    config = load_yaml(path)
+    if "includes" not in config:
+        return config
+
+    includes = config.pop("includes")
+    base_dir = os.path.dirname(path)
+    merged = {}
+    for inc in includes:
+        inc_path = os.path.join(base_dir, inc) if not os.path.isabs(inc) else inc
+        if os.path.exists(inc_path):
+            merged = deep_merge(merged, load_yaml(inc_path))
+    return deep_merge(merged, config)
+
+
+def deep_merge(base: Dict[str, Any],
+               override: Dict[str, Any]) -> Dict[str, Any]:
+    result = base.copy()
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = deep_merge(result[k], v)
+        else:
+            result[k] = deepcopy(v)
+    return result
+
+# Apply CLI args → config dict
+def apply_args_to_config(config: Dict[str, Any],
+                         args: argparse.Namespace) -> Dict[str, Any]:
+    config = deepcopy(config)
+    for name, value in vars(args).items():
+        if name in SKIP_CLI_TO_CONFIG:
+            continue
+        if not _should_override(value):
+            continue
+        cpath = get_config_path(name)
+        if cpath is None:
+            cpath = _search_key(config, name)
+        if cpath is not None:
+            _set_nested(config, cpath, value)
+    return config
+
+
+def _should_override(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (list, str)) and len(value) == 0:
+        return False
+    return True
+
+
+def _set_nested(d: Dict[str, Any], path: List[str], value: Any) -> None:
+    cur = d
+    for k in path[:-1]:
+        if k not in cur:
+            cur[k] = {}
+        cur = cur[k]
+    cur[path[-1]] = value
+
+
+def _search_key(config: Dict[str, Any],
+                key: str,
+                prefix: Optional[List[str]] = None) -> Optional[List[str]]:
+    prefix = prefix or []
+    if key in config:
+        return prefix + [key]
+    for k, v in config.items():
+        if isinstance(v, dict):
+            found = _search_key(v, key, prefix + [k])
+            if found:
+                return found
+    return None
+
+def build_config(args: Optional[argparse.Namespace] = None,
+                 config_file: Optional[str] = None,
+                 config_dict: Optional[Dict[str, Any]] = None,
+                 overrides: Optional[Dict[str, Any]] = None,
+                 root_dir: Optional[str] = None) -> Dict[str, Any]:
+    root = root_dir or os.path.dirname(os.path.dirname(__file__))
+
+    if config_dict is not None:
+        cfg = deepcopy(config_dict)
+    elif config_file is not None:
+        path = config_file if os.path.isabs(config_file) else os.path.join(root, config_file)
+        cfg = load_yaml_with_includes(path)
+    else:
+        cfg = {}
+    
+    if overrides:
+        cfg = deep_merge(cfg, overrides)
+
+    if args is not None:
+        cfg = apply_args_to_config(cfg, args)
+
+    return cfg
+
+def get_value(config: Dict[str, Any], key: str, default: Any = None) -> Any:
+    cur = config
+    for k in key.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
+
+
+def set_value(config: Dict[str, Any], key: str, value: Any) -> None:
+    parts = key.split(".")
+    _set_nested(config, parts, value)
