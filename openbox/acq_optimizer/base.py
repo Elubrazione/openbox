@@ -5,8 +5,9 @@ from ConfigSpace import ConfigurationSpace, Configuration
 from openbox import logger
 from openbox.acquisition_function.acquisition import AbstractAcquisitionFunction
 from .generator import SearchGenerator, LocalSearchGenerator,CMAESGenerator
-from utils import convert_configurations_to_array
+from .utils import convert_configurations_to_array
 from .selector import StrategySelector, FixedSelector
+from openbox.utils.history import Observation, History
 
 class AcquisitionOptimizer(ABC):
     def __init__(
@@ -22,11 +23,11 @@ class AcquisitionOptimizer(ABC):
         self.iter_id = 0
     
     @abstractmethod
-    def _maximize(self, observations: List[Any], num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List[Tuple]:
+    def _maximize(self, history:History, num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List[Tuple]:
         pass
     
-    def maximize(self, observations: List[Any], num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List:
-        results = self._maximize(observations, num_points, excluded_configs, **kwargs)
+    def maximize(self, history:History, num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List:
+        results = self._maximize(history, num_points, excluded_configs, **kwargs)
         return [result[1] for result in results]
     
     def _evaluate_batch(self, configs: List[Configuration], **kwargs) -> np.ndarray:
@@ -43,9 +44,6 @@ class AcquisitionOptimizer(ABC):
     def _acquisition_function(self, configs, **kwargs):
         X = convert_configurations_to_array(configs)
         return self.acq(X, **kwargs)
-    
-
-
     
     
     def _filter_excluded_configs(self, configs: List[Configuration], excluded_configs: List[Configuration]) -> List[Configuration]:
@@ -78,7 +76,7 @@ class AcquisitionOptimizer(ABC):
         
         return filtered
     
-    def _prepare_observations_for_strategy(self, observations: List[Any], strategy, **kwargs) -> List[Any]:
+    def _prepare_observations_for_strategy(self, history:History, strategy, **kwargs) -> List[Any]:
         """Prepare observations for strategy by sorting by actual y value (standard BO approach)
         
         For LocalSearchGenerator, sort observations by actual y value (ascending, assuming minimization).
@@ -97,10 +95,11 @@ class AcquisitionOptimizer(ABC):
         List[Observation]
             Observations sorted by y value (ascending, best first), or original if sorting not needed
         """
-        if isinstance(strategy, LocalSearchGenerator) and observations:
+        if isinstance(strategy, LocalSearchGenerator) and history:
+            observations=history.observations
             sorted_observations = sorted(observations, key=lambda obs: obs.objectives[0])
             return sorted_observations
-        return observations
+        return history.observations
     
     def reset(self):
         self.iter_id = 0
@@ -173,7 +172,7 @@ class CompositeOptimizer(AcquisitionOptimizer):
         self.selector = selector
         self.candidate_multiplier = candidate_multiplier
     
-    def _maximize(self, observations: List[Any], num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List[Tuple]:
+    def _maximize(self, history:History, num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List[Tuple]:
         """use strategy to generate candidates, then batch evaluate and select the best num_points configurations
         
         process:
@@ -201,12 +200,13 @@ class CompositeOptimizer(AcquisitionOptimizer):
         strategy = self.selector.select(self.strategies, self.iter_id)
         logger.info(f"CompositeOptimizer: select strategy: {type(strategy).__name__}")
         
-        sorted_observations = self._prepare_observations_for_strategy(observations, strategy, **kwargs)
+        ##sorted_observations = self._prepare_observations_for_strategy(history, strategy, **kwargs)
         n_candidates = int(num_points * self.candidate_multiplier)
         candidates = strategy.generate(
-            observations=sorted_observations,
+            history=history,
             num_points=n_candidates,
             rng=self.rng,
+            acq_function=self.acq,
             **kwargs
         )
         
@@ -294,7 +294,11 @@ class QuotaCompositeOptimizer(AcquisitionOptimizer):
         self.total_quota = sum(quotas)
         self.candidate_multiplier = candidate_multiplier
     
-    def _maximize(self, observations: List[Any], num_points: int, excluded_configs: List[Configuration] = [], **kwargs) -> List[Tuple]:
+    def _maximize(self, 
+                  history:History, 
+                  num_points: int, 
+                  excluded_configs: List[Configuration] = [],
+                  **kwargs) -> List[Tuple]:
         strategy_num_points = []
         remaining = num_points
         for i, quota in enumerate(self.quotas):
@@ -314,13 +318,14 @@ class QuotaCompositeOptimizer(AcquisitionOptimizer):
                 
             logger.info(f"QuotaCompositeOptimizer: strategy {type(strategy).__name__} generating {n_points} points")
             
-            sorted_observations = self._prepare_observations_for_strategy(observations, strategy, **kwargs)
+            ##sorted_observations = self._prepare_observations_for_strategy(history, strategy, **kwargs)
             
             n_candidates = int(n_points * self.candidate_multiplier)
             candidates = strategy.generate(
-                observations=sorted_observations,
+                history=history,
                 num_points=n_candidates,
                 rng=self.rng,
+                acq_function=self.acq,
                 **kwargs
             )
             

@@ -8,7 +8,7 @@ from openbox.utils.util_funcs import get_types
 import warnings
 from openbox.acquisition_function.acquisition import AbstractAcquisitionFunction
 from openbox.utils.constants import MAXINT
-from my_openbox.compressor.sampling.base import SamplingStrategy
+from ..compressor.sampling import SamplingStrategy
 import scipy.optimize
 
 MAX_INT = 10000
@@ -16,7 +16,7 @@ MAX_INT = 10000
 class SearchGenerator(ABC):    
     @abstractmethod
     def generate(self, 
-                 historys: History,
+                 history: History,
                  num_points: int,
                  rng: np.random.RandomState,
                  acq_function=None,
@@ -24,7 +24,7 @@ class SearchGenerator(ABC):
         pass
 
 class RandomSearchGenerator(SearchGenerator):
-    def __init__(self, sampling_strategy:SamplingStrategy=None,config_space=None):
+    def __init__(self, sampling_strategy:SamplingStrategy=None,config_space=None,random_state=None,batch_size=None):
         if sampling_strategy is not None:
             self.sampling_strategy = sampling_strategy
             self.config_space=sampling_strategy.get_spaces()[0]
@@ -32,17 +32,75 @@ class RandomSearchGenerator(SearchGenerator):
             self.config_space=config_space
         else:
             raise ValueError("sampling_strategy and config_space is required!") 
+        if random_state is None:
+            self.random_state='high'
+        else:
+            self.random_state=random_state
+
+        if batch_size is None:
+            types, bounds = get_types(self.config_space)
+            dim = np.sum(types == 0)
+            self.batch_size = min(5000, max(2000, 200 * dim))
+        else:
+            self.batch_size = batch_size
+        
     def generate(self, 
                  history:History,
                  num_points: int,
                  rng: np.random.RandomState,
                  acq_function=None,
                  **kwargs) -> List[Configuration]:
-        
-        configs = self.sampling_strategy.sample(num_points)
-        for config in configs:
-            config.origin = f'Random Search'
+        if self.random_state=='high':
+            configs = self.sampling_strategy.sample(num_points)
+            for config in configs:
+                config.origin = f'Random Search'
                 
+        elif self.random_state=='medium':
+            from openbox.utils.samplers import SobolSampler
+            cur_idx = 0
+            configs = list()
+            while cur_idx < num_points:
+                batch_size = min(self.batch_size, num_points - cur_idx)
+                turbo_state = kwargs.get('turbo_state', None)
+                if turbo_state is None:
+                    lower_bounds = None
+                    upper_bounds = None
+                else:
+                    num_objectives=history.num_objectives
+                    if num_objectives > 1:
+                        # TODO implement adaptive strategy to choose trust region center for MO
+                        raise NotImplementedError()
+                    else:
+                        incumbent_config = rng.choice(history.get_incumbent_configs())
+                        x_center = incumbent_config.get_array()
+                        lower_bounds = x_center - turbo_state.length / 2.0
+                        upper_bounds = x_center + turbo_state.length / 2.0
+
+                sobol_sampler = SobolSampler(self.config_space, batch_size,
+                                         lower_bounds, upper_bounds,
+                                         random_state=rng.randint(0, int(1e8)))
+                _configs = sobol_sampler.generate(return_config=True)
+                configs.extend([_configs[idx] for idx in range(len(_configs))])
+                cur_idx += self.batch_size
+            for config in configs:
+                config.origin = f'BatchMC Search'
+                
+        elif self.random_state=='low':
+            if acq_function is None:
+                raise ValueError('acq_function is required!')        
+            d=len(self.config_space.get_hyperparameters())
+            bound=(0.0,1.0)
+            configs=[]
+            x_tries = rng.uniform(bound[0], bound[1], size=(num_points, d))
+            for i in range(x_tries.shape[0]):
+            # convert array to Configuration
+                config = Configuration(self.config_space, vector=x_tries[i])
+                config.origin = 'MESMO Search'
+                configs.append(config)
+                
+        else:
+            raise ValueError('Random_state is invalid!')
+        
         return configs
 
 class LocalSearchGenerator(SearchGenerator):    
@@ -71,13 +129,13 @@ class LocalSearchGenerator(SearchGenerator):
                  acq_function=None,
                  **kwargs) -> List[Configuration]:
         init_points = self._get_initial_points(
-            rng,acq_function, num_points, history,self.n_steps_plateau_walk)
+            rng,acq_function, num_points, history)
 
         configs = []
         # Start N local search from different random start points
         for start_point in init_points:
             acq_val, configuration = self._one_iter(
-                rng,acq_function, start_point, **kwargs)
+                rng,acq_function, start_point, self.n_steps_plateau_walk,**kwargs)
 
             configuration.origin = "Local Search"
             configs.append(configuration)
@@ -152,7 +210,8 @@ class LocalSearchGenerator(SearchGenerator):
         incumbent = start_point
         # Compute the acquisition value of the incumbent
         acq_val_incumbent = acquisition_function([incumbent], **kwargs)[0]
-
+        
+        plateau_step=0
         local_search_steps = 0
         neighbors_looked_at = 0
         while True:
@@ -174,13 +233,18 @@ class LocalSearchGenerator(SearchGenerator):
                     incumbent = neighbor
                     acq_val_incumbent = acq_val
                     changed_inc = True
+                    plateau_step=0
                     break
 
-            if (not changed_inc) or \
-                    (self.max_steps is not None and
-                     local_search_steps == self.max_steps):
+            if (self.max_steps is not None and local_search_steps == self.max_steps):
                 break
-
+            
+            if not changed_inc:
+                if plateau_step>=n_steps_plateau_walk:
+                    break
+                else:
+                    plateau_step+=1
+            
         return acq_val_incumbent, incumbent
     
     def _remove_duplicates(self, configs: List[Configuration]) -> List[Configuration]:
@@ -248,7 +312,7 @@ class CMAESGenerator(SearchGenerator):
         return configs
     
 class ScipySearchGenerator(SearchGenerator):
-    def __init__(self,sampling_strategy:SamplingStrategy=None,config_space=None):
+    def __init__(self,sampling_strategy:SamplingStrategy=None,config_space=None,method=None):
         if sampling_strategy is not None:
             self.sampling_strategy = sampling_strategy
             self.config_space=self.sampling_strategy.get_spaces()[0]
@@ -256,26 +320,23 @@ class ScipySearchGenerator(SearchGenerator):
             self.config_space=config_space
         else:
             raise ValueError("sampling_strategy and config_space is required!")
+        self.method=method
+    
         
     def generate(self, 
                  history:History,
                  num_points: int,
                  rng: np.random.RandomState,
                  acq_function=None,
-                 initial_config=None,
+                 initial_configs=None,
                  **kwargs) -> List[Configuration]:
         
         if acq_function is None:
             raise ValueError('acq_function is required!')
-        types, bounds = get_types(self.config_space)    # todo: support constant hp in scipy optimizer
-        assert all(types == 0), 'Scipy optimizer (L-BFGS-B) only supports Integer and Float parameters.'
-        self.bounds = bounds
-
-        options = dict(disp=False, maxiter=1000)
-        self.scipy_config = dict(tol=None, method='L-BFGS-B', options=options)
         
+                
         def negative_acq(x):
-            # shape of x = (d,)
+        # shape of x = (d,)
             x = np.clip(x, 0.0, 1.0)    # fix numerical problem in L-BFGS-B
             try:
                 # self.config_space._check_forbidden(x)
@@ -284,219 +345,52 @@ class ScipySearchGenerator(SearchGenerator):
                 return np.inf
             return -acq_function(x,**kwargs)
         
-        if initial_config is None:
-            if history is None:
-                initial_config=self.sampling_strategy.sample(1)[0]
-            else:
-                initial_config=history.get_incumbent_configs()[0]
-                
-        init_config=initial_config.get_array()
+        if self.method=='local':
+            types, bounds = get_types(self.config_space)    # todo: support constant hp in scipy optimizer
+            assert all(types == 0), 'Scipy optimizer (L-BFGS-B) only supports Integer and Float parameters.'
+            self.bounds = bounds
+            options = dict(disp=False, maxiter=1000)
+            self.scipy_config = dict(tol=None, method='L-BFGS-B', options=options)
+            if initial_configs is None:
+                if history is None:
+                    initial_configs=self.sampling_strategy.sample(num_points)
+            
+            for init_config in initial_configs:    
+                initial_config=init_config.get_array()
         
-        configs=list()
-        with warnings.catch_warnings():
-            # ignore warnings of np.inf
-            warnings.filterwarnings("ignore", message="invalid value encountered in subtract", category=RuntimeWarning)
-            result = scipy.optimize.minimize(fun=negative_acq,
-                                                x0=init_config,
+                configs=list()
+                with warnings.catch_warnings():
+                # ignore warnings of np.inf
+                    warnings.filterwarnings("ignore", message="invalid value encountered in subtract", category=RuntimeWarning)
+                    result = scipy.optimize.minimize(fun=negative_acq,
+                                                x0=initial_config,
                                                 bounds=self.bounds,
                                                 **self.scipy_config)   
-        try:
-            x = np.clip(result.x, 0.0, 1.0)  # fix numerical problem in L-BFGS-B
-            config = Configuration(self.config_space, vector=x,origin = f'Scipy Search')
-            config.is_valid_configuration()
-            configs.append(config)
-        except Exception:
-            pass
-        if not configs:
-            raise ValueError()
-        return configs
-    
-class RandomScipySearchGenerator(SearchGenerator):
-    def __init__(self, sampling_strategy:SamplingStrategy=None,config_space=None):
-        if sampling_strategy is not None:
-            self.sampling_strategy = sampling_strategy
-            self.config_space=sampling_strategy.get_spaces()[0]
-        elif config_space is not None:
-            self.config_space=config_space
-        else:
-            raise ValueError("sampling_strategy and config_space is required!")
-        self.random_search=RandomSearchGenerator(sampling_strategy=self.sampling_strategy,config_space=self.config_space)
-        self.scipy_search=ScipySearchGenerator(sampling_strategy=self.sampling_strategy,config_space=self.config_space)
-        
-        
-    def generate(self, 
-                 history:History,
-                 num_points: int,
-                 rng: np.random.RandomState,
-                 acq_function=None,
-                 num_trials=10,
-                 **kwargs) -> List[Configuration]:
-        assert num_trials >= 3
-        if acq_function is None:
-            raise ValueError("acq_function is required.")
-        initial_configs=self.random_search.generate(num_points=num_points)
-        scipy_initial_configs=initial_configs[0]+self.random_search.generate(num_points=num_trials-1)
-        
-        for initial_config in scipy_initial_configs:
-            scipy_config=self.scipy_search.generate(history=history,
-                                                    rng=rng,
-                                                    acq_function=acq_function,
-                                                    initial_config=initial_config)
-            initial_configs.extend(scipy_config)
+                try:
+                    x = np.clip(result.x, 0.0, 1.0)  # fix numerical problem in L-BFGS-B
+                    config = Configuration(self.config_space, vector=x,origin = f'Scipy Search')
+                    config.is_valid_configuration()
+                    configs.append(config)
+                except Exception:
+                    pass
+                if not configs:
+                    raise ValueError()
             
-        rng.shuffle(initial_configs)
-        return initial_configs[:num_points]
-    
-class ScipyGlobalGenerator(SearchGenerator):
-    def __init__(self, sampling_strategy:SamplingStrategy=None,config_space=None):
-        if sampling_strategy is not None:
-            self.sampling_strategy = sampling_strategy
-            self.config_space=self.sampling_strategy.get_spaces()[0]
-        elif config_space is not None:
-            self.config_space=config_space
-        else:
-            raise ValueError("sampling_strategy and config_space is required!")
-        types, bounds = get_types(self.config_space)
-        assert all(types == 0)
-        self.bounds = bounds
-        
-    def generate(self, 
-                 history:History,
-                 num_points: int,
-                 rng: np.random.RandomState,
-                 acq_function=None,
-                 **kwargs) -> List[Configuration]:
-        
-        if acq_function is None:
-            raise ValueError('acq_function is required!')
-        
-        def negative_acq(x):
-            # shape of x = (d,)
-            x = np.clip(x, 0.0, 1.0)    # fix numerical problem in L-BFGS-B
+        elif self.method=='global':
+            configs = []
+            result = scipy.optimize.differential_evolution(func=negative_acq,bounds=self.bounds)
             try:
-                # self.config_space._check_forbidden(x)
-                Configuration(self.config_space, vector=x).is_valid_configuration()
-            except ValueError:
-                return np.inf
-            return -acq_function(x,**kwargs)
-        configs = []
-        result = scipy.optimize.differential_evolution(func=negative_acq,
-                                                       bounds=self.bounds)
-        
-        try:
-            x = np.clip(result.x, 0.0, 1.0)  # fix numerical problem in L-BFGS-B
-            config = Configuration(self.config_space, vector=x,origin = f'ScipyGlobal Search')
-            config.is_valid_configuration()
-            configs.append(config)
-        except Exception:
-            pass
-        if not configs:
-            raise ValueError()
-        return configs
-    
-class BatchMCGenerator(SearchGenerator):
-    def __init__(self,sampling_strategy:SamplingStrategy=None,config_space=None,batch_size=None):
-        if sampling_strategy is not None:
-            self.sampling_strategy = sampling_strategy
-            self.config_space=self.sampling_strategy.get_spaces()[0]
-        elif config_space is not None:
-            self.config_space=config_space
-        else:
-            raise ValueError("sampling_strategy and config_space is required!")
-        
-        if batch_size is None:
-            types, bounds = get_types(self.config_space)
-            dim = np.sum(types == 0)
-            self.batch_size = min(5000, max(2000, 200 * dim))
-        else:
-            self.batch_size = batch_size
-        
-    def generate(self, 
-                 history:History,
-                 num_points: int,
-                 rng: np.random.RandomState,
-                 acq_function=None,
-                 **kwargs) -> List[Configuration]:
-        from openbox.utils.samplers import SobolSampler
-        cur_idx = 0
-        configs = list()
-        while cur_idx < num_points:
-            batch_size = min(self.batch_size, num_points - cur_idx)
-            turbo_state = kwargs.get('turbo_state', None)
-            if turbo_state is None:
-                lower_bounds = None
-                upper_bounds = None
-            else:
-                num_objectives=history.num_objectives
-                if num_objectives > 1:
-                    # TODO implement adaptive strategy to choose trust region center for MO
-                    raise NotImplementedError()
-                else:
-                    incumbent_config = rng.choice(history.get_incumbent_configs())
-                    x_center = incumbent_config.get_array()
-                    lower_bounds = x_center - turbo_state.length / 2.0
-                    upper_bounds = x_center + turbo_state.length / 2.0
-
-            sobol_sampler = SobolSampler(self.config_space, batch_size,
-                                         lower_bounds, upper_bounds,
-                                         random_state=rng.randint(0, int(1e8)))
-            _configs = sobol_sampler.generate(return_config=True)
-            configs.extend([_configs[idx] for idx in range(len(_configs))])
-            cur_idx += self.batch_size
-        return configs
-    
-class MESMO_Generator(SearchGenerator):
-    def __init__(self,sampling_strategy:SamplingStrategy=None,config_space=None):
-        if sampling_strategy is not None:
-            self.sampling_strategy = sampling_strategy
-            self.config_space=self.sampling_strategy.get_spaces()[0]
-        elif config_space is not None:
-            self.config_space=config_space
-        else:
-            raise ValueError("sampling_strategy and config_space is required!")
-        
-    def generate(self, 
-                 history:History,
-                 num_points: int,
-                 rng: np.random.RandomState,
-                 acq_function=None,
-                 **kwargs) -> List[Configuration]:
-        if acq_function is None:
-            raise ValueError('acq_function is required!')
-        def negative_acq(x):
-            # shape of x = (d,)
-            x = np.clip(x, 0.0, 1.0)    # fix numerical problem in L-BFGS-B
-            try:
-                # self.config_space._check_forbidden(x)
-                Configuration(self.config_space, vector=x).is_valid_configuration()
-            except ValueError:
-                return np.inf
-            return -acq_function(x,**kwargs)
-        
-        self.minimizer=scipy.optimize.minimize()
-        
-        d=len(self.config_space.get_hyperparameters())
-        bound=(0.0,1.0)
-        bounds=[bound]*d
-        configs=[]
-        x_tries = rng.uniform(bound[0], bound[1], size=(num_points, d))
-        for i in range(x_tries.shape[0]):
-            # convert array to Configuration
-            config = Configuration(self.config_space, vector=x_tries[i])
-            config.origin = 'MESMO Random'
-            configs.append(config)
+                x = np.clip(result.x, 0.0, 1.0)  # fix numerical problem in L-BFGS-B
+                config = Configuration(self.config_space, vector=x,origin = f'ScipyGlobal Search')
+                config.is_valid_configuration()
+                configs.append(config)
+            except Exception:
+                pass
+            if not configs:
+                raise ValueError()
             
-        x_seed = rng.uniform(bound[0], bound[1], size=(num_points, d))
-        for i in range(x_seed.shape[0]):
-            x0 = x_seed[i].reshape(1, -1)
-            result = self.minimizer(negative_acq, x0=x0, method='L-BFGS-B', bounds=bounds)
-            if not result.success:
-                continue
-            # convert array to Configuration
-            config = Configuration(self.config_space, vector=result.x)
-            config.origin = 'MESMO Scipy'
-            configs.append(config)
-        
-        rng.shuffle(configs)
-        
-        return configs[:num_points]
+        else:
+            raise  ValueError("method should be local or global")
+            
+        return configs
+    

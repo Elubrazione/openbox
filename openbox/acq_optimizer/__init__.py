@@ -4,15 +4,10 @@ from .basic_maximizer import (
     CMAESMaximizer,
     LocalSearchMaximizer,
     RandomSearchMaximizer,
-    InterleavedLocalAndRandomSearchMaximizer,
     ScipyMaximizer,
     RandomScipyMaximizer,
-    ScipyGlobalMaximizer,
-    StagedBatchScipyMaximizer,
-    MESMO_Maximizer,
-    USeMO_Maximizer,
-    batchMCMaximizer,
 )
+from .upper_maximizer import InterleavedLocalAndRandomSearchMaximizer
 from .build import build_acq_optimizer
 
 __all__ = [
@@ -20,7 +15,5 @@ __all__ = [
     "CMAESMaximizer",
     "LocalSearchMaximizer", "RandomSearchMaximizer", "InterleavedLocalAndRandomSearchMaximizer",
     "ScipyMaximizer", "RandomScipyMaximizer",
-    "ScipyGlobalMaximizer", "StagedBatchScipyMaximizer",
-    "MESMO_Maximizer", "USeMO_Maximizer", "batchMCMaximizer",
     "build_acq_optimizer"
 ]
